@@ -1,0 +1,19 @@
+version: "3.3"
+services:
+  devops-runner:
+    image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/devops-runner:latest
+    ports:
+    - "8080:8080"
+    environment:
+      - PLAYER_NAME=Mateo Van Damme
+      - LOGIC_URL=http://host.docker.internal:8081
+# Uncomment when using Docker on Linux
+#    extra_hosts:
+#      - "host.docker.internal: host-gateway"
+  devops-gui:
+    image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/devops-client:latest
+    ports:
+    - "8000:80"
+    environment:
+      - GAME_HOST=http://localhost:8080
+      - TICK_SECONDS=1

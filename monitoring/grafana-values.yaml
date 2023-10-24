@@ -1,0 +1,28 @@
+#adminPassword: nPP4k\m>C:RV=Ps>
+admin:
+  existingSecret: "grafana-admin"
+  userKey: "admin-user"
+  passwordKey: "admin-password"
+
+rbac:
+  create: false
+  pspEnabled: false
+serviceAccount:
+  create: false
+
+ingress:
+  enabled: true
+  hosts:
+     - devops-proxy.atlantis.ugent.be
+  path: /grafana/devops-team11
+
+grafana.ini:
+  server:
+    domain: devops-proxy.atlantis.ugent.be
+    root_url: "%(protocol)s://%(domain)s/grafana/devops-team11"
+    serve_from_sub_path: true
+
+persistence:
+    enabled: true
+    size: 4Gi
+    storageClassName: k8s-stud-storage

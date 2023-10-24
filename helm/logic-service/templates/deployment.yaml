@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "logic-service.fullname" . }}
+  labels:
+    {{- include "logic-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "logic-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations: 
+        commitSha: {{ .Values.commitSha }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "logic-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: 'gamestate'
+          persistentVolumeClaim:
+            claimName: {{ include "logic-service.fullname" . }}-pvc
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - mountPath: '/app/gamestate'
+              name: 'gamestate'
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: SECURE_ENDPOINTS
+              value: "{{ .Values.logicService.secureEndpoints }}"
+            - name: SECURE_KEY
+              value: "{{ .Values.logicService.secureKey }}"
+

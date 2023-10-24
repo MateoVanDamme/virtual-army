@@ -1,0 +1,13 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ include "logic-service.fullname" . }}-pvc
+  labels:
+    {{- include "logic-service.labels" . | nindent 4 }}
+spec:
+  storageClassName: k8s-stud-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi

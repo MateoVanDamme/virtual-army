@@ -1,0 +1,198 @@
+image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/maven:3.8.1-openjdk-16
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: always
+
+variables:
+  MAVEN_CLI_OPTS: "--batch-mode"
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+  ENABLE_FETCH_LOGS: "true"
+
+cache:
+  key: $CI_COMMIT_REF_SLUG
+  paths:
+    - .m2/repository/**
+    - logic-service/target/**
+    - model/target/**
+
+# Dit zijn de stages die worden uitgevoerd
+stages:
+  - process-hints
+  - build
+  - test
+  - package
+  - integrationtesting
+  - deploy
+  - badges
+
+# Dit zijn de jobs. Er staat telkens de stage bij. Jobs binnen dezelfde stage worden parallel uitegevoerd.
+bonuscode-processor:
+  stage: process-hints
+  image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/toolbox:latest
+  artifacts:
+    untracked: false
+    expire_in: 1 min
+  script:
+    - cd hints/codes
+    - ls -t | head -n1
+    - NAAM=$(ls -t | head -n1)
+    - echo "De meest recente bonuscode is:$NAAM"
+    - curl -X POST -H "X-SECURE-KEY:$SECURE_KEY" -d @$NAAM https://devops-proxy.atlantis.ugent.be/team-apis/11/hints/codes/
+    - echo "Bonus code doorgestuurd"
+  rules:
+    - if: $PROCESS_HINTS == "bonus-codes"
+    - changes:
+        - hints/codes/*
+      when: always
+
+poi-processor:
+  stage: process-hints
+  image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/toolbox:latest
+  artifacts:
+    untracked: false
+    expire_in: 1 min
+  script:
+    - cd hints/POIs
+    - NAAM=$(ls -t | head -n1)
+    - ls -t | head -n1
+    - echo "De meest recente POI lijst is:$NAAM"
+    - curl -X POST -H "X-SECURE-KEY:$SECURE_KEY" -d @$NAAM https://devops-proxy.atlantis.ugent.be/team-apis/11/hints/pois/
+    - echo "POI lijst doorgestuurd"
+  rules:
+    - if: $PROCESS_HINTS == "bonus-codes"
+    - changes:
+        - hints/POIs/*
+      when: always
+
+maven-build-logic-service:
+  stage: build
+  script:
+    - mvn $MAVEN_CLI_OPTS clean compile -pl logic-service
+  variables:
+    BONUS_CODE: "TESTT"
+  rules:
+    - changes:
+        - logic-service/**/*
+        - model/**/*
+        - pom.xml
+      when: always
+    - changes:
+        - hints/**/*
+      when: never
+
+maven-build-model:
+  stage: build
+  script:
+    - mvn $MAVEN_CLI_OPTS clean compile -pl model
+  rules:
+    - changes:
+        - model/**/*
+        - pom.xml
+      when: always
+    - changes:
+        - hints/**/*
+      when: never
+
+unit-tests:
+  stage: test
+  script:
+    - mvn test
+    - awk -F"," '{ instructions += $4 + $5; covered += $5 } END { print covered, "/", instructions, "instructions covered"; print 100*covered/instructions, "% covered" }' logic-service/target/site/jacoco/jacoco.csv
+  coverage: '/^\d*\.\d* %/'
+  rules: &hintrules
+    - changes:
+        - hints/**/*
+      when: never
+    - when: on_success
+
+java:
+  stage: test
+  script:
+    - mvn verify
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - logic-service/target/surefire-reports/TEST-*.xml
+  rules: *hintrules
+
+maven-docker-generation:
+  stage: package
+  script:
+    - mvn deploy
+    # - ls -a
+  rules: *hintrules
+
+integration-tests-job:
+  cache: {}
+  stage: integrationtesting
+  image:
+    name: gitlab.stud.atlantis.ugent.be:5050/utils/docker/devops-runner:latest
+    entrypoint:
+      - ""
+  services:
+    - name: $CI_REGISTRY_IMAGE/logic-service:latest
+      alias: logic-service
+  script:
+    - java -cp /app/resources:/app/classes:/app/libs/* be.ugent.devops.gamehost.services.runner.LauncherKt
+  variables:
+    PLAYER_NAME: "CI/CD Player"
+    LOGIC_URL: http://logic-service:8081
+    TURN_INTERVAL_MS: 15
+    MAP_WIDTH: 15
+    MAP_HEIGHT: 15
+    TURN_LIMIT: 250
+    ENABLE_FETCH_LOGS: "true"
+    ABORT_ON_LOGIC_ERROR: "true"
+  rules: *hintrules
+
+deploy-helm:
+  image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/helm-kubectl:3.7.1
+  stage: deploy
+  before_script:
+    - mkdir ~/.kube
+    - echo $KUBECONFIG_B64 | base64 -d > ~/.kube/config
+  script:
+    - cat ~/.kube/config
+    - kubectl config view
+    - helm lint helm/logic-service
+    - helm upgrade --install logic-service helm/logic-service --set "commitSha='$CI_COMMIT_SHA'" --set logicService.secureEndpoints=true
+  rules: *hintrules
+update-deployed-badge:
+  stage: badges
+  image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/debian:10-slim
+  before_script:
+    - apt-get update
+    - apt-get install curl gridsite-clients -y
+  script:
+    - TIME=$(TZ='Europe/Brussels' date +"%a %b %d @ %k:%M:%S")
+    - LINK_URL=$CI_PROJECT_URL/-/pipelines/latest
+    - IMAGE_URL=$(urlencode "https://img.shields.io/static/v1?color=blue&label=deployed&message=$TIME")
+    - ENDPOINT=https://gitlab.stud.atlantis.ugent.be/api/v4/projects/$CI_PROJECT_ID/badges/204
+    - echo "TIME = $TIME"
+    - echo "LINK_URL = $LINK_URL"
+    - echo "IMAGE_URL = $IMAGE_URL"
+    - echo "ENDPOINT = $ENDPOINT"
+    - echo "ACCESS_TOKEN = $ACCESS_TOKEN"
+    - curl --request PUT --header "PRIVATE-TOKEN:$ACCESS_TOKEN" -d "link_url=${LINK_URL}&image_url=${IMAGE_URL}" $ENDPOINT
+  rules: *hintrules
+
+update-lines-of-code-badge:
+  stage: badges
+  image: gitlab.stud.atlantis.ugent.be:5050/utils/docker/debian:10-slim
+  before_script:
+    - apt-get update
+    - apt-get install curl gridsite-clients -y
+    - apt-get install cloc jq -y
+  script:
+    - cd logic-service/src/main/java/be/ugent/devops/services/logic # Go to logic package folder
+    - printf "./Main.java\n./HttpBinding.java" > .clocIgnore # Create ignore list file
+    - MESSAGE=$(cloc --exclude-list-file=.clocIgnore --include-lang=Java --json . | jq .SUM.code) # Count actual lines of java code, parse with jq, put in var
+    - LINK_URL=$CI_PROJECT_URL/-/pipelines/latest
+    - IMAGE_URL=$(urlencode "https://img.shields.io/static/v1?color=blueviolet&label=Logic%20LoC&message=$MESSAGE")
+    - ENDPOINT=https://gitlab.stud.atlantis.ugent.be/api/v4/projects/$CI_PROJECT_ID/badges/207
+    - curl --request PUT --header "PRIVATE-TOKEN:$ACCESS_TOKEN" -d "link_url=${LINK_URL}&image_url=${IMAGE_URL}" $ENDPOINT
+  rules: *hintrules

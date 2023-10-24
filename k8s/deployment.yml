@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logic-deployment
+  labels:
+    app: logic
+spec:
+  selector:
+    matchLabels:
+      app: logic
+  template:
+    metadata:
+      labels:
+        app: logic
+    spec:
+      containers:
+        - name: logic-service
+          #CHANGE THIS NEXT URI TO YOUR OWN IMAGE URI!!
+          image: gitlab.stud.atlantis.ugent.be:5050/devops-2021/devops-team11/logic-service:latest
+          ports:
+            - containerPort: 8081
+      # More on this later:
+      imagePullSecrets:
+        - name: gitlab-credentials

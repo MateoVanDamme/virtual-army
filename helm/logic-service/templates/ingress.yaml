@@ -1,0 +1,24 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: logic-api-route
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`devops-proxy.atlantis.ugent.be`) && PathPrefix(`/team-apis/11`)
+      kind: Rule
+      services:
+        - name: logic-service
+          port: 80
+      middlewares:
+        - name: strip-prefix-api
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-prefix-api
+spec:
+  stripPrefix:
+    prefixes:
+      - "/team-apis/11" 
